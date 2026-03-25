@@ -1,6 +1,5 @@
 const { DataTypes } = require('sequelize');
 const { sequelize } = require('../db');
-const Inventory = require('./inventory.model');
 
 const Product = sequelize.define('Product', {
     id: {
@@ -29,7 +28,10 @@ const Product = sequelize.define('Product', {
     timestamps: true,
     hooks: {
         afterCreate: async (product, options) => {
-            await Inventory.create({ productId: product.id });
+            const { Inventory } = sequelize.models;
+            if (Inventory) {
+                await Inventory.create({ productId: product.id });
+            }
         }
     }
 });
