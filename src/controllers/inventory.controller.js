@@ -1,10 +1,13 @@
 const Inventory = require('../models/inventory.model');
 const Product = require('../models/product.model');
+const { sequelize } = require('../db');
 
 // Get all inventories with joined product
 const getAllInventories = async (req, res, next) => {
     try {
-        const inventories = await Inventory.find().populate('product');
+        const inventories = await Inventory.findAll({
+            include: [{ model: Product }]
+        });
         res.status(200).json(inventories);
     } catch (error) {
         next(error);
@@ -14,7 +17,9 @@ const getAllInventories = async (req, res, next) => {
 // Get inventory by ID with joined product
 const getInventoryById = async (req, res, next) => {
     try {
-        const inventory = await Inventory.findById(req.params.id).populate('product');
+        const inventory = await Inventory.findByPk(req.params.id, {
+            include: [{ model: Product }]
+        });
         if (!inventory) {
             return res.status(404).json({ message: 'Inventory not found' });
         }
@@ -32,13 +37,18 @@ const addStock = async (req, res, next) => {
             return res.status(400).json({ message: 'Product ID and valid quantity required' });
         }
 
-        const inventory = await Inventory.findOneAndUpdate(
-            { product: product },
-            { $inc: { stock: quantity } },
-            { new: true, upsert: true }
-        ).populate('product');
+        const [inventory, created] = await Inventory.findOrCreate({
+            where: { productId: product },
+            defaults: { stock: quantity }
+        });
 
-        res.status(200).json(inventory);
+        if (!created) {
+            await inventory.increment('stock', { by: quantity });
+            await inventory.reload();
+        }
+
+        const updatedInventory = await Inventory.findByPk(inventory.id, { include: [{ model: Product }] });
+        res.status(200).json(updatedInventory);
     } catch (error) {
         next(error);
     }
@@ -52,22 +62,15 @@ const removeStock = async (req, res, next) => {
             return res.status(400).json({ message: 'Product ID and valid quantity required' });
         }
 
-        // We check if stock is enough before removing
-        const inventory = await Inventory.findOne({ product: product });
+        const inventory = await Inventory.findOne({ where: { productId: product } });
         if (!inventory || inventory.stock < quantity) {
             return res.status(400).json({ message: 'Insufficient stock' });
         }
 
-        const updatedInventory = await Inventory.findOneAndUpdate(
-            { product: product, stock: { $gte: quantity } },
-            { $inc: { stock: -quantity } },
-            { new: true }
-        ).populate('product');
+        await inventory.decrement('stock', { by: quantity });
+        await inventory.reload();
 
-        if (!updatedInventory) {
-            return res.status(400).json({ message: 'Insufficient stock or inventory not found' });
-        }
-
+        const updatedInventory = await Inventory.findByPk(inventory.id, { include: [{ model: Product }] });
         res.status(200).json(updatedInventory);
     } catch (error) {
         next(error);
@@ -76,58 +79,60 @@ const removeStock = async (req, res, next) => {
 
 // Reserve stock
 const reserveStock = async (req, res, next) => {
+    const transaction = await sequelize.transaction();
     try {
         const { product, quantity } = req.body;
         if (!product || quantity <= 0) {
+            await transaction.rollback();
             return res.status(400).json({ message: 'Product ID and valid quantity required' });
         }
 
-        const updatedInventory = await Inventory.findOneAndUpdate(
-            { product: product, stock: { $gte: quantity } },
-            { 
-                $inc: { 
-                    stock: -quantity,
-                    reserved: quantity
-                } 
-            },
-            { new: true }
-        ).populate('product');
-
-        if (!updatedInventory) {
-            return res.status(400).json({ message: 'Insufficient stock or inventory not found' });
+        const inventory = await Inventory.findOne({ where: { productId: product }, transaction });
+        if (!inventory || inventory.stock < quantity) {
+            await transaction.rollback();
+            return res.status(400).json({ message: 'Insufficient stock' });
         }
 
+        await inventory.decrement('stock', { by: quantity, transaction });
+        await inventory.increment('reserved', { by: quantity, transaction });
+        
+        await transaction.commit();
+        await inventory.reload();
+
+        const updatedInventory = await Inventory.findByPk(inventory.id, { include: [{ model: Product }] });
         res.status(200).json(updatedInventory);
     } catch (error) {
+        await transaction.rollback();
         next(error);
     }
 };
 
 // Confirm sale (Sold)
 const confirmSale = async (req, res, next) => {
+    const transaction = await sequelize.transaction();
     try {
         const { product, quantity } = req.body;
         if (!product || quantity <= 0) {
+            await transaction.rollback();
             return res.status(400).json({ message: 'Product ID and valid quantity required' });
         }
 
-        const updatedInventory = await Inventory.findOneAndUpdate(
-            { product: product, reserved: { $gte: quantity } },
-            { 
-                $inc: { 
-                    reserved: -quantity,
-                    soldCount: quantity
-                } 
-            },
-            { new: true }
-        ).populate('product');
-
-        if (!updatedInventory) {
-            return res.status(400).json({ message: 'Insufficient reserved quantity or inventory not found' });
+        const inventory = await Inventory.findOne({ where: { productId: product }, transaction });
+        if (!inventory || inventory.reserved < quantity) {
+            await transaction.rollback();
+            return res.status(400).json({ message: 'Insufficient reserved quantity' });
         }
 
+        await inventory.decrement('reserved', { by: quantity, transaction });
+        await inventory.increment('soldCount', { by: quantity, transaction });
+        
+        await transaction.commit();
+        await inventory.reload();
+
+        const updatedInventory = await Inventory.findByPk(inventory.id, { include: [{ model: Product }] });
         res.status(200).json(updatedInventory);
     } catch (error) {
+        await transaction.rollback();
         next(error);
     }
 };

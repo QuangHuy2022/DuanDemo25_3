@@ -1,32 +1,43 @@
-const mongoose = require('mongoose');
+const { DataTypes } = require('sequelize');
+const { sequelize } = require('../db');
+const Product = require('./product.model');
 
-const inventorySchema = new mongoose.Schema({
-    product: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'Product',
-        required: true,
-        unique: true
+const Inventory = sequelize.define('Inventory', {
+    id: {
+        type: DataTypes.UUID,
+        defaultValue: DataTypes.UUIDV4,
+        primaryKey: true
     },
     stock: {
-        type: Number,
-        required: true,
-        min: 0,
-        default: 0
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 0,
+        validate: {
+            min: 0
+        }
     },
     reserved: {
-        type: Number,
-        required: true,
-        min: 0,
-        default: 0
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 0,
+        validate: {
+            min: 0
+        }
     },
     soldCount: {
-        type: Number,
-        required: true,
-        min: 0,
-        default: 0
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 0,
+        validate: {
+            min: 0
+        }
     }
 }, {
     timestamps: true
 });
 
-module.exports = mongoose.model('Inventory', inventorySchema);
+// Define association
+Product.hasOne(Inventory, { foreignKey: { name: 'productId', allowNull: false }, onDelete: 'CASCADE' });
+Inventory.belongsTo(Product, { foreignKey: { name: 'productId', allowNull: false } });
+
+module.exports = Inventory;

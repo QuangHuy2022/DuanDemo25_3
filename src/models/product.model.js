@@ -1,40 +1,37 @@
-const mongoose = require('mongoose');
+const { DataTypes } = require('sequelize');
+const { sequelize } = require('../db');
+const Inventory = require('./inventory.model');
 
-const productSchema = new mongoose.Schema({
+const Product = sequelize.define('Product', {
+    id: {
+        type: DataTypes.UUID,
+        defaultValue: DataTypes.UUIDV4,
+        primaryKey: true
+    },
     name: {
-        type: String,
-        required: true,
-        trim: true
+        type: DataTypes.STRING,
+        allowNull: false,
+        validate: {
+            notEmpty: true
+        }
     },
     price: {
-        type: Number,
-        required: true,
-        min: 0
+        type: DataTypes.FLOAT,
+        allowNull: false,
+        validate: {
+            min: 0
+        }
     },
     description: {
-        type: String
+        type: DataTypes.TEXT
     }
 }, {
-    timestamps: true
-});
-
-// Auto create inventory after product is created
-productSchema.post('save', async function(doc, next) {
-    try {
-        const Inventory = mongoose.model('Inventory');
-        const inventoryExists = await Inventory.findOne({ product: doc._id });
-        if (!inventoryExists) {
-            await Inventory.create({
-                product: doc._id,
-                stock: 0,
-                reserved: 0,
-                soldCount: 0
-            });
+    timestamps: true,
+    hooks: {
+        afterCreate: async (product, options) => {
+            await Inventory.create({ productId: product.id });
         }
-        next();
-    } catch (error) {
-        next(error);
     }
 });
 
-module.exports = mongoose.model('Product', productSchema);
+module.exports = Product;
